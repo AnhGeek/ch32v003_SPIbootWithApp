@@ -57,6 +57,7 @@ void IAP_2_APP(void)
  */
 int main(void)
 {
+    u8 iap2app_counter = 0;
     RCC->APB2PCENR |= RCC_APB2Periph_GPIOD| RCC_APB2Periph_USART1|RCC_APB2Periph_GPIOC;/* Enable GPIOD,USART1, GPIOC  clock */
     USART1_CFG();
     Delay_Init();
@@ -68,6 +69,9 @@ int main(void)
         UART1_SendData(0x0D);
         UART1_SendData(0x0A);
         Delay_Ms(500);
+        iap2app_counter++;
+        if (iap2app_counter == 10) IAP_2_APP();
     }
+
     
 }
