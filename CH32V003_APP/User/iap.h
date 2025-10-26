@@ -14,6 +14,7 @@
 
 #include "ch32v00x.h"
 #include "stdio.h"
+#include "spiflash.h"
 
 #define USBD_DATA_SIZE    64
 #define FLASH_Base        0x08000000
@@ -33,6 +34,12 @@
 
 #define CalAddr           (0x08004000-4)
 #define CheckNum          (0x5aa55aa5)
+
+extern char _etext;    /* end of code/load image in flash (your map PROVIDE _etext) */
+extern char _edata;    /* end of .data in RAM */
+extern char _sbss;     /* start of .bss */
+extern char _ebss;     /* end of .bss */
+extern char __ram_start__;
 
 typedef union __attribute__ ((aligned(4)))_ISP_CMD {
 
@@ -57,5 +64,7 @@ u8 RecData_Deal(void);
 void USART1_CFG(void);
 void UART_Rx_Deal(void);
 void UART1_SendData(u8 data);
+uint16_t GetLengthFlashMCU(void);
+uint8_t WriteFlashMCU(void);
 #endif
 

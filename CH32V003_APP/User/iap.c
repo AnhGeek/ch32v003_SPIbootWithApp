@@ -26,6 +26,109 @@ u8 EP2_Rx_Buffer[USBD_DATA_SIZE+4];
 #define  isp_cmd_t   ((isp_cmd  *)EP2_Rx_Buffer)
 
 /*********************************************************************
+ * @fn      GetLengthFlashMCU
+ *
+ * @brief   Calculates the total size of MCU flash used by the program.
+ *          - Determines the end of the text (code) section using _etext.
+ *          - Adds the size of the initialized data section (.data)
+ *            to obtain the total flash usage.
+ *          - Assumes the flash memory origin address is 0x00000000.
+ *
+ * @return  Total MCU flash usage (in bytes), truncated to 16 bits.
+ *********************************************************************/
+uint16_t GetLengthFlashMCU(void)
+{
+    uintptr_t flash_used = (uintptr_t)&_etext; /* if FLASH origin = 0x0 */
+    size_t data_size = (uintptr_t)&_edata - (uintptr_t)&__ram_start__;
+    //size_t bss_size  = (uintptr_t)&_ebss  - (uintptr_t)&_sbss;
+
+    // printf("flash_used = 0x%08x (%u bytes)\n", (unsigned)flash_used, (unsigned)flash_used);
+    // printf(".data size:  %u bytes\n", (unsigned)data_size);
+    //printf(".bss  size = %u\n", (unsigned)bss_size);
+
+    return (uint16_t)(flash_used + data_size);
+}
+
+/*********************************************************************
+ * @fn      ReadFlashWord
+ *
+ * @brief   Reads one 32-bit word from MCU internal flash memory.
+ *          - Calculates the absolute memory address by adding the 
+ *            given offset to FLASH_BASE.
+ *          - Uses a volatile pointer to ensure the compiler performs
+ *            a direct hardware memory read (no optimization).
+ *
+ * @param   address - Offset (in bytes) from FLASH_BASE to read from.
+ *
+ * @return  32-bit word value read from the specified flash address.
+ *********************************************************************/
+uint32_t ReadFlashWord(uint32_t address)
+{
+    // Cast the address to a pointer to *volatile uint32_t*
+    volatile uint32_t *ptr = (volatile uint32_t *)(FLASH_BASE + address);
+    
+    // Dereference the pointer ¡ª compiler will perform an actual memory read
+    return *ptr;
+}
+
+/*********************************************************************
+ * @fn      WriteFlashMCU
+ *
+ * @brief   Copies MCU internal flash contents to external SPI flash.
+ *          - Reads MCU flash memory using ReadFlashWord().
+ *          - Writes data to external SPI flash using SPIF_write().
+ *          - Skips the first 256 bytes on the external SPI flash
+ *            (reserved for user data).
+ *          - Reads from MCU flash starting at address 0.
+ *          - Transfers data in 256-byte pages.
+ *          - Pads the last page with 0xFF if data is less than 256 bytes.
+ *
+ * @return  0  - Write successful.
+ *          1  - No flash data to copy (flashLength == 0).
+ *********************************************************************/
+uint8_t WriteFlashMCU(void)
+{
+    uint8_t  flashData[256] = {0};
+    uint32_t flashLength = GetLengthFlashMCU();   // total MCU flash size in bytes
+    uint32_t remainingFlash = flashLength;
+    uint32_t mcuAddr = 0;         // read from start of MCU flash
+    uint32_t spiAddr = 256;       // skip first 256 bytes on external SPI flash
+    uint16_t i;
+
+    if (flashLength == 0)
+        return 1; // nothing to copy
+
+    while (remainingFlash > 0)
+    {
+        uint16_t chunkSize = (remainingFlash >= 256) ? 256 : remainingFlash;
+
+        // Fill 256-byte buffer from MCU flash
+        for (i = 0; i < chunkSize; i += 4)
+        {
+            uint32_t word = ReadFlashWord(mcuAddr);
+            *(uint32_t *)&flashData[i] = word;   // single 32-bit copy
+            mcuAddr += 4;
+        }
+
+        // If last block < 256 bytes, pad with 0xFF
+        if (chunkSize < 256)
+        {
+            for (i = chunkSize; i < 256; i++)
+                flashData[i] = 0xFF;
+        }
+
+        // Write one 256-byte page to SPI flash
+        SPIF_write(spiAddr, flashData, 256);
+
+        // Advance
+        spiAddr += 256;
+        remainingFlash -= chunkSize;
+    }
+
+    return 0; // Success
+}
+
+/*********************************************************************
  * @fn      USART1_CFG
  *
  * @brief   GPIOD-USART1 init
@@ -194,4 +297,8 @@ void UART_Rx_Deal(void)
             }
         }
     }
+}
+
+void mcu_to_spiflash(void){
+
 }
