@@ -12,7 +12,10 @@ void SPI_FullDuplex_Init(void)
     GPIO_InitTypeDef GPIO_InitStructure={0};
     SPI_InitTypeDef SPI_InitStructure={0};
 
-    
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_30MHz;
+    GPIO_Init(GPIOD, &GPIO_InitStructure);
 
     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_5;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;

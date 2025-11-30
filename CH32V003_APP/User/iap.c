@@ -118,7 +118,7 @@ uint8_t WriteFlashMCU(void)
         }
 
         // Write one 256-byte page to SPI flash
-        SPIF_write(spiAddr, flashData, 256);
+        SPIF_write(NORMAL_FLASH, spiAddr, flashData, 256);
 
         // Advance
         spiAddr += 256;

@@ -19,7 +19,10 @@
 #define SPIF_INST_ENABLE_WRITE              0x06
 #define SPIF_INST_3B_WRITE                  0x02
 #define SPIF_INST_3B_READ                   0x03
+#define SPIF_INST_3B_SEC_WRITE              0x42
+#define SPIF_INST_3B_SEC_READ               0x48 
 #define SPIF_INST_3B_ERASE_SECT             0x20
+#define SPIF_INST_3B_ERASE_SEC_RES          0x44
 #define SPIF_INST_ERASE_32BLOCK             0x52
 #define SPIF_INST_ERASE                     0xC7
 
@@ -70,9 +73,10 @@ void SPIF_enable_write()
 
 	SPIF_send_inst(SPIF_INST_ENABLE_WRITE);
 
+	SPIF_CS_disable();
+
 	while (!(SPIF_read_status() & SPIF_STAT_WRITE_ENABLE)) {}
 
-	SPIF_CS_disable();
 	return;
 }
 
@@ -81,7 +85,7 @@ void SPIF_enable_write()
 ** It has all memory address space available, including the last sector used 
 ** as temporary storage.
 */
-SPIF_RET_t SPIF_uncheck_read(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_uncheck_read(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 
 	if (address > SPIF_SIZE) return SPIF_ERR_MEM_ADDR_OUTOF_RANGE;
@@ -92,11 +96,12 @@ SPIF_RET_t SPIF_uncheck_read(uint32_t address, uint8_t* buff, uint32_t size)
 	SPIF_CS_disable();
 	SPIF_CS_enable();
 
-	SPIF_send_inst(SPIF_INST_3B_READ);
+	SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_READ : SPIF_INST_3B_READ);
 
 	SPIF_send_inst(address >> 16);
 	SPIF_send_inst(address >> 8);
 	SPIF_send_inst(address);
+	if(security_area) SPIF_send_inst(SPIF_INST_READ_RESPONSE);
 
 	for (uint32_t j = 0; j < size; j++)
 	{
@@ -112,7 +117,7 @@ SPIF_RET_t SPIF_uncheck_read(uint32_t address, uint8_t* buff, uint32_t size)
 ** Auxiliary function to write given buffer to flash. It has all memory address
 ** space available, including the last sector used as temporary storage.
 */
-SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_uncheck_write(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 	uint32_t offset = 0;
 	uint32_t page_address = 0;
@@ -134,7 +139,7 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 	SPIF_CS_disable();
 	SPIF_CS_enable();
 
-	SPIF_send_inst(SPIF_INST_3B_WRITE);
+	SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_WRITE : SPIF_INST_3B_WRITE);
 	SPIF_send_inst(address >> 16);
 	SPIF_send_inst(address >> 8);
 	SPIF_send_inst(address);
@@ -154,9 +159,9 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_send_inst(buff[j]);
 	}
 
-	while (SPIF_read_status() & SPIF_STAT_BUSY) {}
-
 	SPIF_CS_disable();
+
+	while (SPIF_read_status() & SPIF_STAT_BUSY) {}
 
 	/* Write pages in the middle */
 
@@ -169,7 +174,7 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_CS_disable();
 		SPIF_CS_enable();
 
-		SPIF_send_inst(SPIF_INST_3B_WRITE);
+		SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_WRITE : SPIF_INST_3B_WRITE);
 		SPIF_send_inst(page_address >> 16);
 		SPIF_send_inst(page_address >> 8);
 		SPIF_send_inst(page_address);
@@ -180,9 +185,10 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 			SPIF_send_inst(buff[offset + j]);
 		}
 
+		SPIF_CS_disable();
+
 		while (SPIF_read_status() & SPIF_STAT_BUSY) {}
 
-		SPIF_CS_disable();
 	}
 
 
@@ -196,7 +202,7 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_CS_disable();
 		SPIF_CS_enable();
 
-		SPIF_send_inst(SPIF_INST_3B_WRITE);
+		SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_WRITE : SPIF_INST_3B_WRITE);
 		SPIF_send_inst(last_page >> 16);
 		SPIF_send_inst(last_page >> 8);
 		SPIF_send_inst(last_page);
@@ -205,10 +211,8 @@ SPIF_RET_t SPIF_uncheck_write(uint32_t address, uint8_t* buff, uint32_t size)
 		{
 			SPIF_send_inst(buff[offset + j]);
 		}
-
+        SPIF_CS_disable();
 		while (SPIF_read_status() & SPIF_STAT_BUSY) {}
-
-		SPIF_CS_disable();
 	}
 
 	return SPIF_OK;
@@ -236,7 +240,7 @@ void SPIF_erase(void)
 }
 
 /* Fill the given sector with 0xFF, */
-void SPIF_3B_erase_sector(uint32_t address)
+void SPIF_3B_erase_page(uint8_t page)
 {
 	while (SPIF_read_status() & SPIF_STAT_BUSY) {}
 
@@ -245,11 +249,11 @@ void SPIF_3B_erase_sector(uint32_t address)
 	SPIF_CS_disable();
 	SPIF_CS_enable();
 
-	SPIF_send_inst(SPIF_INST_3B_ERASE_SECT);
+	SPIF_send_inst(SPIF_INST_3B_ERASE_SEC_RES);
 
-	SPIF_send_inst(address >> 16);
-	SPIF_send_inst(address >> 8);
-	SPIF_send_inst(address);
+	SPIF_send_inst(0x00);
+	SPIF_send_inst((page << 4) & 0xF0);
+	SPIF_send_inst(0x00);
 
 
 	SPIF_CS_disable();
@@ -276,13 +280,13 @@ uint32_t SPIF_get_size(void)
 }
 
 /* Read from flash to buffer up to last sector*/
-SPIF_RET_t SPIF_read(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_read(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 
 	if (address > SPIF_VIRT_SIZE )  return SPIF_ERR_MEM_ADDR_OUTOF_RANGE;
 	if (address + size > SPIF_VIRT_SIZE ) return SPIF_ERR_SIZE_OUTOF_RANGE;
 
-	return SPIF_uncheck_read(address, buff, size);
+	return SPIF_uncheck_read(security_area, address, buff, size);
 }
 
 /*
@@ -290,7 +294,7 @@ SPIF_RET_t SPIF_read(uint32_t address, uint8_t* buff, uint32_t size)
 ** 1's where there is a 0's) then returns SPIF_ERR_INCOMPATIBLE_WRITE. Any previous
 ** pages that were compatible are writen.
 */
-SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_write(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 	uint32_t offset = 0;
 	uint32_t page_address = 0;
@@ -313,7 +317,7 @@ SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_CS_disable();
 		SPIF_CS_enable();
 
-		SPIF_send_inst(SPIF_INST_3B_READ);
+		SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_READ : SPIF_INST_3B_READ);
 		//SPIF_send_inst(address >> 24);
 		SPIF_send_inst(address >> 16);
 		SPIF_send_inst(address >> 8);
@@ -329,7 +333,7 @@ SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_CS_disable();
 
 		/* Write page */
-		SPIF_fast_write(page_address, buff+offset, SPIF_PAGE_SIZE);
+		SPIF_fast_write(security_area, page_address, buff+offset, SPIF_PAGE_SIZE);
 	}
 
 	if( remainder != 0 )
@@ -340,7 +344,7 @@ SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
 		SPIF_CS_disable();
 		SPIF_CS_enable();
 
-		SPIF_send_inst(SPIF_INST_3B_READ);
+		SPIF_send_inst(security_area ? SPIF_INST_3B_SEC_READ : SPIF_INST_3B_READ);
 		SPIF_send_inst(page_address >> 16);
 		SPIF_send_inst(page_address >> 8);
 		SPIF_send_inst(page_address);
@@ -354,7 +358,7 @@ SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
 
 		SPIF_CS_disable();
 
-		SPIF_fast_write(page_address, buff+offset, remainder);
+		SPIF_fast_write(security_area, page_address, buff+offset, remainder);
 
 	}
 
@@ -366,12 +370,12 @@ SPIF_RET_t SPIF_write(uint32_t address, uint8_t* buff, uint32_t size)
 ** are filled with 0xFF (erased), otherwise the sectors may end up with
 ** corrupted data.
 */
-SPIF_RET_t SPIF_fast_write(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_fast_write(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 	if (address > SPIF_VIRT_SIZE ) return SPIF_ERR_MEM_ADDR_OUTOF_RANGE;
 	if (address + size > SPIF_VIRT_SIZE ) return SPIF_ERR_SIZE_OUTOF_RANGE;
 
-	return SPIF_uncheck_write(address, buff, size);
+	return SPIF_uncheck_write(security_area, address, buff, size);
 }
 
 /*
@@ -379,179 +383,19 @@ SPIF_RET_t SPIF_fast_write(uint32_t address, uint8_t* buff, uint32_t size)
 ** otherwise it writes data to an auxiliary sector and overwrites the whole
 ** sector.
 */
-SPIF_RET_t SPIF_force_write(uint32_t address, uint8_t* buff, uint32_t size)
+SPIF_RET_t SPIF_force_write(uint8_t security_area, uint32_t address, uint8_t* buff, uint32_t size)
 {
 	/*
 	** Write instruction can only write 0s so we need to read the involved
 	** sectors, which is the smallest unit we can erase. Afterwards we
 	** write the previously stored data updated with the new one.
 	*/
-	SPIF_RET_t ret = SPIF_write(address, buff, size);
+	SPIF_RET_t ret = SPIF_write(security_area, address, buff, size);
 	if (ret == SPIF_ERR_INCOMPATIBLE_WRITE)
 	{
-		return SPIF_slow_write(address, buff, size);
+		return SPIF_slow_write(security_area, address, buff, size);
 	}
 
 	return ret;
 }
 
-/*
-** Writes involved sectors to an auxiliary one even if it is not needed.
-*/
-SPIF_RET_t SPIF_slow_write(uint32_t address, uint8_t* buff, uint32_t size)
-{
-	uint32_t first_sector = address - (address % SPIF_SECTOR_SIZE);
-	uint32_t last_sector = (address + size) - ( (address + size) % SPIF_SECTOR_SIZE);
-	int32_t sector_count = (size / SPIF_SECTOR_SIZE) - 1;
-	uint32_t sector_addr = 0;
-	uint32_t page_addr = 0;
-	uint32_t page_count = 0;
-	uint8_t write_size = 0;
-	int32_t buff_offset = 0;
-	uint8_t remainder = 0;
-	uint8_t tmp[SPIF_PAGE_SIZE] = { 0 };
-
-	if (address > SPIF_SIZE ) return SPIF_ERR_MEM_ADDR_OUTOF_RANGE;
-	if (address + size > SPIF_SIZE ) return SPIF_ERR_SIZE_OUTOF_RANGE;
-
-	/*
-	** Shouldn't be able to write more than one sector with a single instruction
-	** due to lack of memory to store such buffer. Despite that this approach
-	** still works in case you may write an indeterminate amount of sectors.
-	*/
-
-	/* First sector may be a mix of existing and new data */
-	SPIF_4B_erase_sector(SPIF_VIRT_SIZE);
-
-	/* We save previous data until we get to new data */
-	page_count = (address - first_sector) / SPIF_PAGE_SIZE;
-	for (uint32_t j = 0; j < page_count; j++)
-	{
-		page_addr = first_sector + (j * SPIF_PAGE_SIZE);
-		SPIF_read(page_addr, tmp, SPIF_PAGE_SIZE);
-		SPIF_uncheck_write( ( SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-	}
-	page_addr = first_sector + (page_count * SPIF_PAGE_SIZE);
-	write_size = address - page_addr;
-	SPIF_read(page_addr, tmp, write_size);
-	SPIF_uncheck_write( SPIF_VIRT_SIZE + page_addr, tmp, write_size);
-
-	/* Save actual data */
-
-	if ( (address + size) >= (first_sector + SPIF_SECTOR_SIZE) )
-	{
-		page_count = (first_sector + SPIF_SECTOR_SIZE - address) / SPIF_PAGE_SIZE;
-		remainder = (first_sector + SPIF_SECTOR_SIZE) - (address + (page_count * SPIF_PAGE_SIZE) );
-	}
-	else
-	{
-		page_count = size / SPIF_PAGE_SIZE;
-		remainder = size % SPIF_PAGE_SIZE;
-	}
-
-	for (uint32_t j = 0; j < page_count; j++)
-	{
-		SPIF_uncheck_write( SPIF_VIRT_SIZE + address + (j * SPIF_PAGE_SIZE), buff, SPIF_PAGE_SIZE);
-	}
-	buff_offset = (page_count * SPIF_PAGE_SIZE);
-	SPIF_uncheck_write( SPIF_VIRT_SIZE + address + (page_count * SPIF_PAGE_SIZE), buff + buff_offset, remainder);
-
-	if ( (address + size) < (first_sector + SPIF_SECTOR_SIZE) )
-	{
-		/* Save rest */
-		page_count = ( first_sector + SPIF_SECTOR_SIZE - (address + size) ) / SPIF_PAGE_SIZE;
-		for (uint32_t j = 0; j < page_count; j++)
-		{
-			page_addr = address + size + (j * SPIF_PAGE_SIZE);
-			SPIF_read(page_addr, tmp, SPIF_PAGE_SIZE);
-			SPIF_uncheck_write( ( SPIF_VIRT_SIZE + ( address + size) + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-		}
-
-		page_addr = address + size + (page_count * SPIF_PAGE_SIZE);
-		write_size = first_sector + SPIF_SECTOR_SIZE - page_addr;
-		SPIF_read(page_addr, tmp, write_size);
-		SPIF_uncheck_write( page_addr, tmp, write_size );
-
-	}
-
-	/* Write data	from auxiliary sector */
-
-	SPIF_4B_erase_sector(first_sector);
-	for (uint32_t j = 0; j < (SPIF_SECTOR_SIZE / SPIF_PAGE_SIZE); j++)
-	{
-		page_addr = first_sector + (j * SPIF_PAGE_SIZE);
-		SPIF_uncheck_read( (SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE) ) , tmp, SPIF_PAGE_SIZE);
-		SPIF_fast_write(page_addr, tmp, SPIF_PAGE_SIZE);
-	}
-
-	// Sectors in between should always contain new data
-
-	for (int32_t i = 0; i < sector_count; i++)
-	{
-		sector_addr = first_sector + ( i * SPIF_SECTOR_SIZE);
-
-		SPIF_4B_erase_sector(SPIF_VIRT_SIZE);
-
-		for (uint32_t j = 0; j < (SPIF_SECTOR_SIZE / SPIF_PAGE_SIZE); j++)
-		{
-			page_addr = sector_addr + (j * SPIF_PAGE_SIZE);
-			SPIF_read(page_addr, tmp, SPIF_PAGE_SIZE);
-			SPIF_uncheck_write( ( SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-		}
-
-		SPIF_4B_erase_sector(sector_addr);
-
-		for (uint32_t j = 0; j < (SPIF_SECTOR_SIZE / SPIF_PAGE_SIZE); j++)
-		{
-			page_addr = sector_addr + (j * SPIF_PAGE_SIZE);
-
-			SPIF_uncheck_read( ( SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-			SPIF_fast_write(page_addr, tmp, SPIF_PAGE_SIZE);
-		}
-
-	}
-
-	/* Last sector */
-	if(last_sector && last_sector != first_sector){
-
-		SPIF_4B_erase_sector(SPIF_VIRT_SIZE);
-
-		page_count = (address + size - last_sector) / SPIF_PAGE_SIZE;
-		remainder = (address + size - last_sector) - ( page_count * SPIF_PAGE_SIZE);
-		buff_offset = size - (address + size - last_sector);
-
-		for (uint32_t j = 0; j < page_count; j++)
-		{
-			SPIF_uncheck_write( SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE), buff + buff_offset, SPIF_PAGE_SIZE);
-		}
-		buff_offset = buff_offset + (page_count * SPIF_PAGE_SIZE);
-		SPIF_uncheck_write( SPIF_VIRT_SIZE + (page_count * SPIF_PAGE_SIZE), buff + address + size - last_sector, remainder);
-		// Save rest
-		page_count = ( last_sector + SPIF_SECTOR_SIZE - (address + size) ) / SPIF_PAGE_SIZE;
-		for (uint32_t j = 0; j < page_count; j++)
-		{
-			page_addr = address + size + (j * SPIF_PAGE_SIZE);
-			SPIF_read(4096+256, tmp, SPIF_PAGE_SIZE);
-			SPIF_uncheck_write( ( SPIF_VIRT_SIZE + ( address + size - last_sector ) + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-		}
-
-		page_addr = address + size + (page_count * SPIF_PAGE_SIZE);
-		write_size = last_sector + SPIF_SECTOR_SIZE - page_addr;
-		SPIF_read(page_addr, tmp, write_size);
-		SPIF_uncheck_write( page_addr, tmp, write_size );
-
-		SPIF_4B_erase_sector(last_sector);
-
-		for (uint32_t j = 0; j < (SPIF_SECTOR_SIZE / SPIF_PAGE_SIZE); j++)
-		{
-			page_addr = last_sector + (j * SPIF_PAGE_SIZE);
-
-			SPIF_uncheck_read( ( SPIF_VIRT_SIZE + (j * SPIF_PAGE_SIZE) ), tmp, SPIF_PAGE_SIZE);
-			SPIF_fast_write(page_addr, tmp, SPIF_PAGE_SIZE);
-		}
-
-	}
-
-
-	return SPIF_OK;
-}
